@@ -5,9 +5,33 @@ import 'package:intl/intl.dart';
 import '../../core/api/resource_service.dart';
 import '../../core/auth/auth_provider.dart';
 import '../../core/widgets/common.dart';
+import '../../models/user.dart';
 
 final _messagesProvider = FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) => ResourceService('/messages').list());
 final _personnelForMessagerieProvider = FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) => ResourceService('/personnel').list());
+
+/// Professeurs des classes des enfants du parent connecté — dérivés de son emploi du temps
+/// (`/emplois-du-temps` est déjà scopé côté backend aux classes de ses enfants, comme
+/// `/cahier-textes` et `/presences`), pour lui permettre de démarrer une conversation avec
+/// UN professeur réellement assigné à un de ses enfants plutôt qu'avec tout l'établissement.
+final _mesProfesseursProvider = FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
+  final creneaux = await ResourceService('/emplois-du-temps').list();
+  final professeurs = <int, Map<String, dynamic>>{};
+  for (final c in creneaux) {
+    final id = c['enseignant'];
+    if (id != null) {
+      professeurs.putIfAbsent(id as int, () => {'id': id, 'nom': c['enseignant_nom']?.toString() ?? 'Professeur'});
+    }
+  }
+  return professeurs.values.toList();
+});
+
+/// Administration (direction/administrateurs) — annuaire du personnel filtré aux rôles
+/// habilités à échanger avec un parent hors du corps enseignant.
+final _administrationProvider = FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
+  final personnel = await ResourceService('/personnel').list();
+  return personnel.where((p) => p['role'] == 'ADMIN' || p['role'] == 'RESPONSABLE').toList();
+});
 
 /// Miroir de `MessageriePanel` (frontend/src/components/communication/MessageriePanel.jsx)
 /// — partagé par les 4 rôles. La messagerie déléguée (délégué de classe pour un enseignant)
@@ -72,9 +96,12 @@ class _MessageriePanelState extends ConsumerState<MessageriePanel> {
   @override
   Widget build(BuildContext context) {
     final user = ref.watch(authProvider).user;
-    final peutComposer = user?.estPersonnel ?? false;
+    final estParent = user?.role == UserRole.parent;
+    final peutComposer = (user?.estPersonnel ?? false) || estParent;
     final messagesAsync = ref.watch(_messagesProvider);
-    final personnelAsync = peutComposer ? ref.watch(_personnelForMessagerieProvider) : const AsyncValue<List<Map<String, dynamic>>>.data([]);
+    final personnelAsync = (peutComposer && !estParent) ? ref.watch(_personnelForMessagerieProvider) : const AsyncValue<List<Map<String, dynamic>>>.data([]);
+    final professeursAsync = estParent ? ref.watch(_mesProfesseursProvider) : const AsyncValue<List<Map<String, dynamic>>>.data([]);
+    final administrationAsync = estParent ? ref.watch(_administrationProvider) : const AsyncValue<List<Map<String, dynamic>>>.data([]);
 
     return ListView(
       children: [
@@ -89,21 +116,23 @@ class _MessageriePanelState extends ConsumerState<MessageriePanel> {
                   Text(_replyTo != null ? 'Répondre à ${_replyTo!['nom']}' : 'Nouveau message', style: const TextStyle(fontWeight: FontWeight.w700)),
                   const SizedBox(height: 10),
                   if (peutComposer && _replyTo == null)
-                    personnelAsync.when(
-                      data: (personnel) {
-                        final annuaire = personnel.where((p) => p['id'] != user?.id).toList();
-                        return DropdownButtonFormField<int>(
-                          initialValue: _destinataireId,
-                          decoration: const InputDecoration(labelText: 'Destinataire'),
-                          items: annuaire
-                              .map((p) => DropdownMenuItem(value: p['id'] as int, child: Text('${p['first_name']} ${p['last_name']} (${p['role']})')))
-                              .toList(),
-                          onChanged: (v) => setState(() => _destinataireId = v),
-                        );
-                      },
-                      loading: () => const LinearProgressIndicator(),
-                      error: (e, _) => const Text('Annuaire indisponible'),
-                    ),
+                    estParent
+                        ? _destinatairesParent(professeursAsync, administrationAsync)
+                        : personnelAsync.when(
+                            data: (personnel) {
+                              final annuaire = personnel.where((p) => p['id'] != user?.id).toList();
+                              return DropdownButtonFormField<int>(
+                                initialValue: _destinataireId,
+                                decoration: const InputDecoration(labelText: 'Destinataire'),
+                                items: annuaire
+                                    .map((p) => DropdownMenuItem(value: p['id'] as int, child: Text('${p['first_name']} ${p['last_name']} (${p['role']})')))
+                                    .toList(),
+                                onChanged: (v) => setState(() => _destinataireId = v),
+                              );
+                            },
+                            loading: () => const LinearProgressIndicator(),
+                            error: (e, _) => const Text('Annuaire indisponible'),
+                          ),
                   const SizedBox(height: 10),
                   TextField(controller: _objetCtrl, decoration: const InputDecoration(labelText: 'Objet')),
                   const SizedBox(height: 10),
@@ -182,6 +211,25 @@ class _MessageriePanelState extends ConsumerState<MessageriePanel> {
           },
         ),
       ],
+    );
+  }
+
+  Widget _destinatairesParent(AsyncValue<List<Map<String, dynamic>>> professeursAsync, AsyncValue<List<Map<String, dynamic>>> administrationAsync) {
+    if (professeursAsync.isLoading || administrationAsync.isLoading) return const LinearProgressIndicator();
+
+    final professeurs = professeursAsync.asData?.value ?? const <Map<String, dynamic>>[];
+    final administration = administrationAsync.asData?.value ?? const <Map<String, dynamic>>[];
+    final items = <DropdownMenuItem<int>>[
+      ...professeurs.map((p) => DropdownMenuItem(value: p['id'] as int, child: Text('Professeur — ${p['nom']}'))),
+      ...administration.map((a) => DropdownMenuItem(value: a['id'] as int, child: Text('Administration — ${a['first_name']} ${a['last_name']}'))),
+    ];
+
+    if (items.isEmpty) return const Text('Aucun destinataire disponible pour le moment.', style: TextStyle(fontSize: 12.5));
+    return DropdownButtonFormField<int>(
+      initialValue: _destinataireId,
+      decoration: const InputDecoration(labelText: 'Destinataire'),
+      items: items,
+      onChanged: (v) => setState(() => _destinataireId = v),
     );
   }
 }

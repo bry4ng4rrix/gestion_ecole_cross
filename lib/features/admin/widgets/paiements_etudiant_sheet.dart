@@ -548,8 +548,7 @@ class _PaiementsContentState extends ConsumerState<_PaiementsContent> {
                               const SizedBox(height: 24),
                               Text('Cartes d\'écolage — suivi mensuel', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
                               const SizedBox(height: 10),
-                              ...List.generate(12, (i) {
-                                final mois = i + 1;
+                              ...(((anneeActive['mois_ecolage_actifs'] as List?)?.cast<int>() ?? List.generate(12, (i) => i + 1))..sort()).map((mois) {
                                 final lignes = paiementsParMois(mois);
                                 final dejaPaye = lignes.any((p) => p['statut'] == 'PAYE');
                                 final busy = _actionEnCours == 'mois-$mois' || _actionEnCours == 'facture-$mois';

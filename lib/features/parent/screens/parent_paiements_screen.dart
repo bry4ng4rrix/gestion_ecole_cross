@@ -174,16 +174,16 @@ class _EnfantPaiementsCardState extends ConsumerState<_EnfantPaiementsCard> {
             ),
             if (anneeActive != null) ...[
               const SizedBox(height: 20),
-              Text('Suivi mensuel — Janvier à Décembre', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+              Text('Suivi mensuel', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
               const SizedBox(height: 10),
               paiementsAsync.when(
                 loading: () => const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Center(child: CircularProgressIndicator())),
                 error: (e, _) => const Text('Paiements indisponibles', style: TextStyle(fontSize: 12)),
                 data: (paiements) {
                   final aujourdhui = DateTime.now().toIso8601String().substring(0, 10);
+                  final moisActifs = ((anneeActive['mois_ecolage_actifs'] as List?)?.cast<int>() ?? List.generate(12, (i) => i + 1))..sort();
                   return Column(
-                    children: List.generate(12, (i) {
-                      final mois = i + 1;
+                    children: moisActifs.map((mois) {
                       final lignes = paiements.where((p) => p['mois_couvert'] == mois && p['commentaire'] != _marqueurInscription).toList();
                       final echeance = _dateEcheancePourMois(anneeActive, mois);
                       final busy = _factureEnCours == 'mois-$mois';
@@ -209,7 +209,7 @@ class _EnfantPaiementsCardState extends ConsumerState<_EnfantPaiementsCard> {
                             ? _petitBouton('Facture', Colors.blue, busy, () => _telechargerFacture(anneeId!, mois))
                             : null,
                       );
-                    }),
+                    }).toList(),
                   );
                 },
               ),

@@ -17,16 +17,140 @@ class AdminAcademiqueScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 3,
+      length: 4,
       child: Column(
         children: [
-          const TabBar(tabs: [Tab(text: 'Classes'), Tab(text: 'Matières'), Tab(text: 'Salles')]),
+          const TabBar(tabs: [Tab(text: 'Classes'), Tab(text: 'Matières'), Tab(text: 'Salles'), Tab(text: 'Année scolaire')]),
           const SizedBox(height: 12),
           const Expanded(
-            child: TabBarView(children: [_ClassesTab(), _MatieresTab(), _SallesTab()]),
+            child: TabBarView(children: [_ClassesTab(), _MatieresTab(), _SallesTab(), _AnneeScolaireTab()]),
           ),
         ],
       ),
+    );
+  }
+}
+
+const _moisLabels = [
+  '', 'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
+  'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre',
+];
+
+/// Configuration des mois d'écolage actifs pour une année scolaire : les mois cochés sont
+/// ceux où les élèves sont en cours et redevables de l'écolage mensuel — répercuté sur le
+/// suivi mensuel affiché aux élèves/parents et sur le total dû (voir
+/// `AnneeScolaire.mois_ecolage_actifs`, backend/application/models.py).
+class _AnneeScolaireTab extends ConsumerStatefulWidget {
+  const _AnneeScolaireTab();
+
+  @override
+  ConsumerState<_AnneeScolaireTab> createState() => _AnneeScolaireTabState();
+}
+
+class _AnneeScolaireTabState extends ConsumerState<_AnneeScolaireTab> {
+  int? _anneeId;
+  Set<int> _moisSelectionnes = {};
+  bool _initialise = false;
+  bool _sauvegardeEnCours = false;
+
+  void _initialiserDepuis(Map<String, dynamic> annee) {
+    _anneeId = annee['id'] as int;
+    final mois = (annee['mois_ecolage_actifs'] as List?)?.cast<int>() ?? List.generate(12, (i) => i + 1);
+    _moisSelectionnes = mois.toSet();
+    _initialise = true;
+  }
+
+  Future<void> _sauvegarder() async {
+    if (_anneeId == null) return;
+    if (_moisSelectionnes.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sélectionnez au moins un mois.')));
+      return;
+    }
+    setState(() => _sauvegardeEnCours = true);
+    try {
+      final tries = _moisSelectionnes.toList()..sort();
+      await ResourceService('/annees-scolaires').update(_anneeId, {'mois_ecolage_actifs': tries});
+      ref.invalidate(adminAnneesScolairesProvider);
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Mois d'écolage enregistrés.")));
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Erreur lors de l'enregistrement.")));
+    } finally {
+      if (mounted) setState(() => _sauvegardeEnCours = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final anneesAsync = ref.watch(adminAnneesScolairesProvider);
+    return anneesAsync.when(
+      loading: () => const LoadingView(),
+      error: (e, _) => ErrorView(message: 'Années scolaires indisponibles', onRetry: () => ref.invalidate(adminAnneesScolairesProvider)),
+      data: (annees) {
+        if (annees.isEmpty) return const EmptyView(message: 'Aucune année scolaire configurée.');
+        if (!_initialise) {
+          final actives = annees.where((a) => a['est_active'] == true).toList();
+          _initialiserDepuis(actives.isNotEmpty ? actives.first : annees.first);
+        }
+
+        return ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            const SectionHeader(title: 'Année scolaire', subtitle: "Mois où les élèves sont en cours et redevables de l'écolage."),
+            const SizedBox(height: 12),
+            if (annees.length > 1) ...[
+              DropdownButtonFormField<int>(
+                initialValue: _anneeId,
+                decoration: const InputDecoration(labelText: 'Année scolaire'),
+                items: annees
+                    .map((a) => DropdownMenuItem(value: a['id'] as int, child: Text('${a['libelle']}${a['est_active'] == true ? ' (active)' : ''}')))
+                    .toList(),
+                onChanged: (v) {
+                  if (v == null) return;
+                  setState(() => _initialiserDepuis(annees.firstWhere((a) => a['id'] == v)));
+                },
+              ),
+              const SizedBox(height: 16),
+            ],
+            Text("Mois d'écolage actifs", style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 4),
+            Text(
+              'Ex : décochez novembre et décembre si les élèves ne sont pas en cours (donc pas redevables) ces mois-là.',
+              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: List.generate(12, (i) {
+                final mois = i + 1;
+                final selectionne = _moisSelectionnes.contains(mois);
+                return FilterChip(
+                  label: Text(_moisLabels[mois]),
+                  selected: selectionne,
+                  onSelected: (v) => setState(() {
+                    if (v) {
+                      _moisSelectionnes.add(mois);
+                    } else {
+                      _moisSelectionnes.remove(mois);
+                    }
+                  }),
+                );
+              }),
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _sauvegardeEnCours ? null : _sauvegarder,
+                icon: _sauvegardeEnCours
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.save_rounded, size: 18),
+                label: const Text('Enregistrer'),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
