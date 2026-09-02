@@ -11,7 +11,7 @@ Future<void> downloadAndOpen(String path, String fileName) async {
     path,
     options: Options(responseType: ResponseType.bytes),
   );
-  await _enregistrerEtOuvrir(response.data!, fileName);
+  await enregistrerEtOuvrir(response.data!, fileName);
 }
 
 /// Variante POST de [downloadAndOpen] — certains endpoits de génération PDF déclenchent
@@ -21,10 +21,12 @@ Future<void> downloadAndOpenPost(String path, String fileName) async {
     path,
     options: Options(responseType: ResponseType.bytes),
   );
-  await _enregistrerEtOuvrir(response.data!, fileName);
+  await enregistrerEtOuvrir(response.data!, fileName);
 }
 
-Future<void> _enregistrerEtOuvrir(List<int> bytes, String fileName) async {
+/// Enregistre des octets générés localement (ex. carte d'identité capturée depuis un
+/// `RepaintBoundary`) et les ouvre — même mécanique que pour un fichier téléchargé du serveur.
+Future<void> enregistrerEtOuvrir(List<int> bytes, String fileName) async {
   final dir = await getTemporaryDirectory();
   final file = File('${dir.path}/$fileName');
   await file.writeAsBytes(bytes);

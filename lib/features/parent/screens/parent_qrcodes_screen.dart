@@ -1,21 +1,9 @@
-import 'dart:typed_data';
-
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/api/api_client.dart';
 import '../../../core/api/file_download.dart';
 import '../../../core/widgets/common.dart';
 import '../parent_providers.dart';
-
-final _qrSortieBytesProvider = FutureProvider.autoDispose.family<Uint8List, int>((ref, etudiantId) async {
-  final response = await ApiClient.instance.dio.get<List<int>>(
-    '/etudiants/$etudiantId/qrcode-sortie/',
-    options: Options(responseType: ResponseType.bytes),
-  );
-  return Uint8List.fromList(response.data!);
-});
 
 /// QR code de sortie de chaque enfant, imprimable, à présenter au gardien pour le contrôle
 /// de sortie — un QR distinct par enfant (miroir de `qrcode-sortie`/`carte-sortie` du backend).
@@ -76,7 +64,7 @@ class _CarteQrEnfantState extends ConsumerState<_CarteQrEnfant> {
     final scheme = Theme.of(context).colorScheme;
     final enfant = widget.enfant;
     final id = enfant['id'] as int;
-    final qrAsync = ref.watch(_qrSortieBytesProvider(id));
+    final qrAsync = ref.watch(qrSortieBytesProvider(id));
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
