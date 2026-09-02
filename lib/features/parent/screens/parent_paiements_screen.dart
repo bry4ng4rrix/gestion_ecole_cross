@@ -33,11 +33,18 @@ final _paiementsEnfantProvider = FutureProvider.autoDispose.family<List<Map<Stri
 /// Miroir de `PaymentsTab` / `ChildDossierCard` (frontend/src/pages/ParentDashboard.jsx),
 /// enrichi du calendrier mensuel janvier→décembre par enfant (statut payé/non payé) avec
 /// téléchargement de facture sur les mois déjà payés.
-class ParentPaiementsScreen extends ConsumerWidget {
+class ParentPaiementsScreen extends ConsumerStatefulWidget {
   const ParentPaiementsScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ParentPaiementsScreen> createState() => _ParentPaiementsScreenState();
+}
+
+class _ParentPaiementsScreenState extends ConsumerState<ParentPaiementsScreen> {
+  int? _filtreEnfantId;
+
+  @override
+  Widget build(BuildContext context) {
     final enfantsAsync = ref.watch(mesEnfantsProvider);
     final anneesAsync = ref.watch(anneesScolairesProvider);
 
@@ -50,15 +57,36 @@ class ParentPaiementsScreen extends ConsumerWidget {
         data: (annees) {
           final actives = annees.where((a) => a['est_active'] == true).toList();
           final anneeActive = actives.isNotEmpty ? actives.first : (annees.isNotEmpty ? annees.first : null);
+          final enfantsFiltres = _filtreEnfantId == null ? enfants : enfants.where((e) => e['id'] == _filtreEnfantId).toList();
 
           return RefreshIndicator(
             onRefresh: () async => ref.invalidate(mesEnfantsProvider),
             child: ListView(
               children: [
                 const SectionHeader(title: 'Paiements'),
+                if (enfants.length > 1) ...[
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      ChoiceChip(
+                        label: const Text('Tous les enfants'),
+                        selected: _filtreEnfantId == null,
+                        onSelected: (_) => setState(() => _filtreEnfantId = null),
+                      ),
+                      ...enfants.map((enfant) => ChoiceChip(
+                            label: Text('${enfant['prenom']}'),
+                            selected: _filtreEnfantId == enfant['id'],
+                            onSelected: (_) => setState(() => _filtreEnfantId = enfant['id'] as int),
+                          )),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 if (enfants.isEmpty) const EmptyView(message: 'Aucun enfant rattaché à votre compte.'),
                 if (enfants.isNotEmpty && anneeActive == null) const EmptyView(message: 'Aucune année scolaire active.'),
-                ...enfants.map((enfant) => _EnfantPaiementsCard(enfant: enfant, anneeActive: anneeActive)),
+                ...enfantsFiltres.map((enfant) => _EnfantPaiementsCard(enfant: enfant, anneeActive: anneeActive)),
                 const SizedBox(height: 24),
               ],
             ),
